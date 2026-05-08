@@ -1,0 +1,123 @@
+#include <ECE3.h>
+
+uint16_t sensorValues[8];
+
+const int left_nslp_pin = 31;
+const int left_dir_pin  = 29;
+const int left_pwm_pin  = 40;
+
+const int right_nslp_pin = 11;
+const int right_dir_pin  = 30;
+const int right_pwm_pin  = 39;
+
+const int LED_RF = 41;
+const int baseSpd = 60;
+
+const float kp = 0.1;
+const float kd = 0.7;
+
+// Start with your current calibration guesses
+int min_vals[8] = {642, 573, 574, 596, 550, 596, 596, 665};
+int max_vals[8] = {2500, 2500, 2500, 2039, 1897, 2500, 2180, 2500};
+
+// Left negative, right positive
+int sensorWeights[8] = {-35, -25, -15, -5, 5, 15, 25, 35};
+
+float previousPositionError = 0.0;
+float adjustment;
+float leftSpd;
+float rightSpd;
+
+void setup()
+{
+  pinMode(right_nslp_pin, OUTPUT);
+  pinMode(right_dir_pin, OUTPUT);
+  pinMode(right_pwm_pin, OUTPUT);
+
+  digitalWrite(right_dir_pin, LOW);
+  digitalWrite(right_nslp_pin, HIGH);
+
+  pinMode(left_nslp_pin, OUTPUT);
+  pinMode(left_dir_pin, OUTPUT);
+  pinMode(left_pwm_pin, OUTPUT);
+
+  digitalWrite(left_dir_pin, HIGH);
+  digitalWrite(left_nslp_pin, HIGH);
+
+  pinMode(LED_RF, OUTPUT);
+
+  ECE3_Init();
+  //kp = error_margin*base_spd/max_error;
+  Serial.begin(9600);
+  delay(2000);
+}
+
+void loop()
+{
+  ECE3_read_IR(sensorValues);
+
+  float positionError = get_error(sensorValues) + 1.3;
+  float steeringError = positionError - previousPositionError;
+  previousPositionError = positionError;
+
+  adjustment = positionError *kp + steeringError *kd;
+
+  leftSpd = baseSpd + adjustment;
+  rightSpd = baseSpd - adjustment;
+
+	analogWrite(left_pwm_pin,leftSpd);
+	analogWrite(right_pwm_pin,rightSpd);
+
+
+  /*Serial.print("Position Error: ");
+  Serial.print(positionError);
+  Serial.print("\tSteering Error: ");
+  Serial.println(steeringError);
+  Serial.print("\tadjustment: ");
+  Serial.println(adjustment);
+  Serial.print("\tLeft speed: ");
+  Serial.println(leftSpd);
+  Serial.print("\tRight speed: ");
+  Serial.println(rightSpd);
+
+  delay(2000);*/
+}
+
+//positive Kp, negative Kd
+float get_error(uint16_t currentSensors[8])
+{
+  float weightedSum = 0.0;
+  float totalSignal = 0.0;
+
+  for (int s = 0; s < 8; s++)
+  {
+    // Update calibration if current reading goes outside old range
+    if (currentSensors[s] < min_vals[s]) {
+      min_vals[s] = currentSensors[s];
+    }
+    if (currentSensors[s] > max_vals[s]) {
+      max_vals[s] = currentSensors[s];
+    }
+
+    // Avoid divide-by-zero / bad map range
+    if (max_vals[s] <= min_vals[s]) {
+      continue;
+    }
+
+    float normalized = map(currentSensors[s], min_vals[s], max_vals[s], 0, 1000);
+    normalized = constrain(normalized, 0, 1000);
+
+    weightedSum += normalized * sensorWeights[s];
+    totalSignal += normalized;
+  }
+
+  // If no line is seen, return previous error or 0
+  if (totalSignal < 1) {
+    return 0;
+  }
+
+  // Weighted average error
+  float errortotal = weightedSum / totalSignal;
+
+  return errortotal;
+}
