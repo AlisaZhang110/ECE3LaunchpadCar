@@ -12,6 +12,9 @@ const int right_pwm_pin  = 39;
 
 const int LED_RF = 41;
 
+const float kp = 0.04;
+const float kd = 0.2;
+
 // Start with your current calibration guesses
 int min_vals[8] = {642, 573, 574, 596, 550, 596, 596, 665};
 int max_vals[8] = {2500, 2500, 2500, 2039, 1897, 2500, 2180, 2500};
@@ -20,6 +23,7 @@ int max_vals[8] = {2500, 2500, 2500, 2039, 1897, 2500, 2180, 2500};
 int sensorWeights[8] = {-35, -25, -15, -5, 5, 15, 25, 35};
 
 float previousPositionError = 0.0;
+float adjustment;
 
 void setup()
 {
@@ -28,19 +32,19 @@ void setup()
   pinMode(right_pwm_pin, OUTPUT);
 
   digitalWrite(right_dir_pin, LOW);
-  digitalWrite(right_nslp_pin, LOW);
+  digitalWrite(right_nslp_pin, HIGH);
 
   pinMode(left_nslp_pin, OUTPUT);
   pinMode(left_dir_pin, OUTPUT);
   pinMode(left_pwm_pin, OUTPUT);
 
   digitalWrite(left_dir_pin, LOW);
-  digitalWrite(left_nslp_pin, LOW);
+  digitalWrite(left_nslp_pin, HIGH);
 
   pinMode(LED_RF, OUTPUT);
 
   ECE3_Init();
-
+  //kp = error_margin*base_spd/max_error;
   Serial.begin(9600);
   delay(2000);
 }
@@ -53,13 +57,23 @@ void loop()
   float steeringError = positionError - previousPositionError;
   previousPositionError = positionError;
 
-  Serial.print("Position Error: ");
+  adjustment = positionError *kp + steeringError *kd;
+
+  leftSpd = baseSpd + adjustment;
+  rightSpd = baseSpd - adjustment;
+
+	analogWrite(pwm,leftSpd);
+	analogWrite(pwm,rightSpd);
+}
+
+
+  /*Serial.print("Position Error: ");
   Serial.print(positionError);
   Serial.print("\tSteering Error: ");
   Serial.println(steeringError);
 
   delay(50);
-}
+}*/
 
 //positive Kp, negative Kd
 float get_error(uint16_t currentSensors[8])
