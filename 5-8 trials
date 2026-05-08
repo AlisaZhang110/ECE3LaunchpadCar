@@ -13,8 +13,8 @@ const int right_pwm_pin  = 39;
 const int LED_RF = 41;
 const int baseSpd = 60;
 
-const float kp = 0.1;
-const float kd = 0.7;
+const float kp = 0.8;
+const float kd = 0.04;
 
 // Start with your current calibration guesses
 int min_vals[8] = {642, 573, 574, 596, 550, 596, 596, 665};
@@ -41,13 +41,12 @@ void setup()
   pinMode(left_dir_pin, OUTPUT);
   pinMode(left_pwm_pin, OUTPUT);
 
-  digitalWrite(left_dir_pin, HIGH);
+  digitalWrite(left_dir_pin, LOW);
   digitalWrite(left_nslp_pin, HIGH);
 
   pinMode(LED_RF, OUTPUT);
 
   ECE3_Init();
-  //kp = error_margin*base_spd/max_error;
   Serial.begin(9600);
   delay(2000);
 }
@@ -56,11 +55,11 @@ void loop()
 {
   ECE3_read_IR(sensorValues);
 
-  float positionError = get_error(sensorValues) + 1.3;
+  float positionError = -(get_error(sensorValues) + 1.3);
   float steeringError = positionError - previousPositionError;
   previousPositionError = positionError;
 
-  adjustment = positionError *kp + steeringError *kd;
+  adjustment = (positionError * kp) + (steeringError * kd);
 
   leftSpd = baseSpd + adjustment;
   rightSpd = baseSpd - adjustment;
@@ -113,7 +112,7 @@ float get_error(uint16_t currentSensors[8])
 
   // If no line is seen, return previous error or 0
   if (totalSignal < 1) {
-    return 0;
+    return previousPositionError;
   }
 
   // Weighted average error
