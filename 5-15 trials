@@ -16,6 +16,10 @@ const int baseSpd = 60;
 const float kp = 0.08;
 const float kd = 0.04;
 
+bool first_turn_done = false;
+bool read_once = false;
+bool read_twice = false;
+
 // Start with your current calibration guesses
 int min_vals[8] = {642, 573, 574, 596, 550, 596, 596, 665};
 int max_vals[8] = {2500, 2500, 2500, 2039, 1897, 2500, 2180, 2500};
@@ -55,27 +59,28 @@ void setup()
 void loop()
 {
   ECE3_read_IR(sensorValues);
-  bool first_turn_done = false;
-  bool read_once = false;
-  bool read_twice = false;
+  //turn around point
   if(reads_black_line(sensorValues) && read_once == false)
   {
     read_once = true;
-    if(reads_black_line(sensorValues) && read_twice == false)
+    //checking for false positive
+    if(reads_black_line(sensorValues)) //&& read_twice == false)
     {
       read_twice = true;
-
+      turn_around();
+      first_turn_done = true;
     }
   }
-  if (reads_black_line(sensorValues) && read_twice && first_turn_done == false)
+  //end of the track (back at beginning where it's supposed to stop)
+  if (reads_black_line(sensorValues) && read_twice == true && first_turn_done == true)
   {
-      //do the turn
-      first_turn_done = true;
-
-  }
-  else
-  {
-    //stop
+    //checking for false positive
+      if (reads_black_line(sensorValues))
+      {
+        //stops
+        analogWrite(left_pwm_pin,0);
+	      analogWrite(right_pwm_pin,0);
+      }
   }
   
   float error = get_error(sensorValues);
@@ -118,7 +123,7 @@ bool reads_black_line(uint16_t currentSensors[8])
       count++;
     }
   }
-  if(count>4)
+  if(count > 4)
     return true;
   return false;
 }
@@ -126,7 +131,6 @@ bool reads_black_line(uint16_t currentSensors[8])
 void turn_around()
 {
   turnSpd = 60;
-  start_time = millis()
   analogWrite(left_pwm_pin,turnSpd);
 	analogWrite(right_pwm_pin,-turnSpd);
 }
