@@ -78,13 +78,8 @@ void loop()
   if (state == FOLLOW_LINE && onBlackLine && !wasOnBlackLine) {
     blackLineCount++;
 
-    Serial.print("Black line count: ");
-    Serial.println(blackLineCount);
-
     // Before turning: black twice means turn around
     if (!hasTurnedAround && blackLineCount == 2) {
-      Serial.println("Saw black twice before turn. Turning around.");
-
       state = TURN_AROUND;
       hasTurnedAround = true;
       blackLineCount = 0;        // reset count for after the turn
@@ -93,8 +88,6 @@ void loop()
 
     // After turning: black twice means stop
     else if (hasTurnedAround && blackLineCount == 2) {
-      Serial.println("Saw black twice after turn. Stopping.");
-
       state = STOPPED;
     }
   }
@@ -165,13 +158,13 @@ bool reads_black_line(uint16_t currentSensors[8])
 
   for (int s = 0; s < 8; s++)
   {
-    if (currentSensors[s] >= max_vals[s] - 1000)
+    if (currentSensors[s] >= max_vals[s] - 100)
     {
       count++;
     }
   }
 
-  return count > 5;
+  return count >= 7;
 }
 
 void turn_around()
