@@ -31,7 +31,7 @@ float rightSpd;
 
 int blackLineCount = 0;
 bool wasOnBlackLine = false;
-bool first_turn_done = false;
+bool hasTurnedAround = false;
 
 enum RobotState {
   FOLLOW_LINE,
@@ -74,17 +74,31 @@ void loop()
 
   bool onBlackLine = reads_black_line(sensorValues);
 
-  // Detect a NEW black line crossing
-  if (onBlackLine && !wasOnBlackLine) {
+  // Detect a NEW black-line crossing
+  if (state == FOLLOW_LINE && onBlackLine && !wasOnBlackLine) {
     blackLineCount++;
-    if (blackLineCount == 2 && !first_turn_done) {
+
+    Serial.print("Black line count: ");
+    Serial.println(blackLineCount);
+
+    // Before turning: black twice means turn around
+    if (!hasTurnedAround && blackLineCount == 2) {
+      Serial.println("Saw black twice before turn. Turning around.");
+
       state = TURN_AROUND;
-      first_turn_done = true;
+      hasTurnedAround = true;
+      blackLineCount = 0;        // reset count for after the turn
       turnStartTime = millis();
+    }
+
+    // After turning: black twice means stop
+    else if (hasTurnedAround && blackLineCount == 2) {
+      Serial.println("Saw black twice after turn. Stopping.");
+
+      state = STOPPED;
     }
   }
 
-  // Update previous black line state
   wasOnBlackLine = onBlackLine;
 
   if (state == FOLLOW_LINE) {
@@ -95,9 +109,11 @@ void loop()
 
     if (millis() - turnStartTime >= turnDuration) {
       state = FOLLOW_LINE;
-
-      // reset derivative so it does not jerk after turn
       previousPositionError = 0;
+
+      // Important: reset this so the robot does not instantly count
+      // the same black line it is sitting on after the turn.
+      wasOnBlackLine = true;
     }
   }
   else if (state == STOPPED) {
