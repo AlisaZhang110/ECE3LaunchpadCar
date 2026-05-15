@@ -1,0 +1,233 @@
+#include <ECE3.h>
+
+uint16_t sensorValues[8];
+
+const int left_nslp_pin = 31;
+const int left_dir_pin  = 29;
+const int left_pwm_pin  = 40;
+
+const int right_nslp_pin = 11;
+const int right_dir_pin  = 30;
+const int right_pwm_pin  = 39;
+
+const int LED_RF = 41;
+const int baseSpd = 60;
+
+const float kp = 0.08;
+const float kd = 0.04;
+
+// Start with your current calibration guesses
+int min_vals[8] = {642, 573, 574, 596, 550, 596, 596, 665};
+int max_vals[8] = {2500, 2500, 2500, 2039, 1897, 2500, 2180, 2500};
+
+// Left negative, right positive
+int sensorWeights[8] = {-35, -25, -15, -5, 5, 15, 25, 35};
+//int sensorWeights[8] = {-8, -4, -2, -1, 1, 2, 4, 8};
+
+float previousPositionError = 0.0;
+float adjustment;
+float leftSpd;
+float rightSpd;
+
+int blackLineCount = 0;
+bool wasOnBlackLine = false;
+bool hasTurnedAround = false;
+int blackStableCount = 0;
+const int blackStableNeeded = 3;
+
+enum RobotState {
+  FOLLOW_LINE,
+  TURN_AROUND,
+  STOPPED
+};
+
+RobotState state = FOLLOW_LINE;
+
+unsigned long turnStartTime = 0;
+const unsigned long turnDuration = 900; // adjust experimentally
+const int turnSpd = 70;
+
+void setup()
+{
+  pinMode(right_nslp_pin, OUTPUT);
+  pinMode(right_dir_pin, OUTPUT);
+  pinMode(right_pwm_pin, OUTPUT);
+
+  digitalWrite(right_dir_pin, LOW);
+  digitalWrite(right_nslp_pin, HIGH);
+
+  pinMode(left_nslp_pin, OUTPUT);
+  pinMode(left_dir_pin, OUTPUT);
+  pinMode(left_pwm_pin, OUTPUT);
+
+  digitalWrite(left_dir_pin, LOW);
+  digitalWrite(left_nslp_pin, HIGH);
+
+  pinMode(LED_RF, OUTPUT);
+
+  ECE3_Init();
+  Serial.begin(9600);
+  delay(2000);
+}
+
+void loop()
+{
+  ECE3_read_IR(sensorValues);
+
+ bool rawBlackLine = reads_black_line(sensorValues);
+ if (rawBlackLine) {
+  blackStableCount++;
+  } else {
+  blackStableCount = 0;
+}
+
+bool onBlackLine = blackStableCount >= blackStableNeeded;
+
+  // Detect a NEW black-line crossing
+  if (state == FOLLOW_LINE && onBlackLine && !wasOnBlackLine) {
+    blackLineCount++;
+
+    // Before turning: black twice means turn around
+    if (!hasTurnedAround && blackLineCount == 2) {
+      state = TURN_AROUND;
+      hasTurnedAround = true;
+      blackLineCount = 0;        // reset count for after the turn
+      turnStartTime = millis();
+    }
+
+    // After turning: black twice means stop
+    else if (hasTurnedAround && blackLineCount == 2) {
+      state = STOPPED;
+    }
+  }
+
+  wasOnBlackLine = onBlackLine;
+
+  if (state == FOLLOW_LINE) {
+    follow_line();
+  }
+  else if (state == TURN_AROUND) {
+    turn_around();
+
+    if (millis() - turnStartTime >= turnDuration) {
+      state = FOLLOW_LINE;
+      previousPositionError = 0;
+
+      // Important: reset this so the robot does not instantly count
+      // the same black line it is sitting on after the turn.
+      wasOnBlackLine = true;
+    }
+  }
+  else if (state == STOPPED) {
+    stop_motors();
+  }
+
+  /*Serial.print("Function output: ");
+  Serial.print(error);
+  Serial.print("\t Position Error: ");
+  Serial.print(positionError);
+  Serial.print("\tSteering Error: ");
+  Serial.println(steeringError);
+  Serial.print("\tadjustment: ");
+  Serial.println(adjustment);
+  Serial.print("\tLeft speed: ");
+  Serial.println(leftSpd);
+  Serial.print("\tRight speed: ");
+  Serial.println(rightSpd);
+
+  delay(100);*/
+}
+
+void follow_line()
+{
+  float error = get_error(sensorValues);
+
+  float positionError = -(error + 1.3);
+  float steeringError = positionError - previousPositionError;
+  previousPositionError = positionError;
+
+  adjustment = (positionError * kp) + (steeringError * kd);
+
+  leftSpd = baseSpd + adjustment;
+  rightSpd = baseSpd - adjustment;
+
+  leftSpd = constrain(leftSpd, 0, 255);
+  rightSpd = constrain(rightSpd, 0, 255);
+
+  digitalWrite(left_dir_pin, LOW);
+  digitalWrite(right_dir_pin, LOW);
+
+  analogWrite(left_pwm_pin, leftSpd);
+  analogWrite(right_pwm_pin, rightSpd);
+}
+
+bool reads_black_line(uint16_t currentSensors[8])
+{
+  int count = 0;
+
+  for (int s = 0; s < 8; s++)
+  {
+    if (currentSensors[s] >= max_vals[s] - 1000)
+    {
+      count++;
+    }
+  }
+
+  return count > 5;
+}
+
+void turn_around()
+{
+  // Left motor forward
+  digitalWrite(left_dir_pin, LOW);
+  analogWrite(left_pwm_pin, turnSpd);
+
+  // Right motor backward
+  digitalWrite(right_dir_pin, HIGH);
+  analogWrite(right_pwm_pin, turnSpd);
+}
+
+void stop_motors()
+{
+  analogWrite(left_pwm_pin, 0);
+  analogWrite(right_pwm_pin, 0);
+}
+
+//positive Kp, negative Kd
+float get_error(uint16_t currentSensors[8])
+{
+  float weightedSum = 0.0;
+  float totalSignal = 0.0;
+
+  for (int s = 0; s < 8; s++)
+  {
+    // Update calibration if current reading goes outside old range
+    if (currentSensors[s] < min_vals[s]) {
+      min_vals[s] = currentSensors[s];
+    }
+    //if (currentSensors[s] > max_vals[s]) {
+    //  max_vals[s] = currentSensors[s];
+    //}
+
+    // Avoid divide-by-zero / bad map range
+    if (max_vals[s] <= min_vals[s]) {
+      continue;
+    }
+
+    float normalized = ((currentSensors[s] - min_vals[s]) * 1000 / (max_vals[s] - min_vals[s])) ;
+    //Serial.println(normalized);
+
+    weightedSum += normalized * sensorWeights[s];
+    totalSignal += normalized;
+  }
+
+  // If no line is seen, return previous error or 0
+  if (totalSignal < 1) {
+    return previousPositionError;
+  }
+
+  // Weighted average error
+  float errortotal = weightedSum / totalSignal;
+  weightedSum = weightedSum /20;
+  return weightedSum;
+}
